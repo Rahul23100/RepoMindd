@@ -20,7 +20,7 @@ from typing import Dict, Optional, Tuple, Generator, List
 
 st.set_page_config(
     page_title="RepoMind AI - Analyze & Chat",
-    page_icon="🧠",
+    page_icon="",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -287,7 +287,7 @@ def create_commit_timeline(commit_months: Dict) -> go.Figure:
 
 def render_sidebar():
     with st.sidebar:
-        st.header("⚙️ Configuration")
+        st.header(" Configuration")
         st.info("Connect to your remote Ollama model running on Google Colab.")
         ollama_endpoint = st.text_input("Ollama Endpoint (ngrok URL)", value="<PASTE_YOUR_NGROK_URL_HERE>", help="Paste public ngrok URL from Colab.")
         ollama_model = st.text_input("Ollama Model", value="llama3:8b", help="For better accuracy, try llama3:8b or mistral.")
@@ -410,3 +410,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
