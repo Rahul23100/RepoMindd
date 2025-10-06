@@ -1,11 +1,3 @@
-# ==================================================================================
-# RepoMind AI - v3.5 (Final)
-#
-# Changelog:
-# - Moved Key Statistics into the AI Summary tab for a consolidated view.
-# - Added an automatic Project Preview feature to the Visualizations tab.
-# - The app now searches for and displays a representative image from the repo.
-# ==================================================================================
 
 import os
 import git
@@ -28,7 +20,7 @@ from typing import Dict, Optional, Tuple, Generator, List
 
 st.set_page_config(
     page_title="RepoMind AI - Analyze & Chat",
-    page_icon="",
+    page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -128,7 +120,6 @@ def get_file_tree(repo_path: str, max_items=25) -> str:
             break
     return "\n".join(tree)
 
-# --- NEW: Function to find a preview image in the repository ---
 def find_preview_image(repo_path: str) -> Optional[bytes]:
     """Searches for a potential preview image and returns its bytes if found."""
     image_extensions = ['.png', '.jpg', '.jpeg', '.gif']
@@ -141,14 +132,12 @@ def find_preview_image(repo_path: str) -> Optional[bytes]:
             if any(file.lower().endswith(ext) for ext in image_extensions):
                 candidate_files.append(os.path.join(root, file))
 
-    # Prioritize files with keywords in their name
     for keyword in search_keywords:
         for f in candidate_files:
             if keyword in f.lower():
                 with open(f, 'rb') as img_file:
                     return img_file.read()
     
-    # If no keyword match, return the first image found (if any)
     if candidate_files:
         with open(candidate_files[0], 'rb') as img_file:
             return img_file.read()
@@ -184,7 +173,7 @@ def clone_and_analyze_repository(repo_url: str) -> Tuple[Optional[Dict], Optiona
         latest_commit_date = datetime.fromtimestamp(commits[0].committed_date).strftime('%d %b %Y') if commits else "N/A"
         repo_size = get_dir_size(str(temp_dir))
         file_tree_summary = get_file_tree(str(temp_dir))
-        preview_image = find_preview_image(str(temp_dir)) # Find preview image
+        preview_image = find_preview_image(str(temp_dir))
 
         repo.close()
         
@@ -245,6 +234,27 @@ def generate_ai_summary(analysis_data: Dict, endpoint: str, model: str) -> Optio
         st.error(f"Failed to connect to Ollama: {e}")
         return None
 
+# +++ NEW CACHED WRAPPER FUNCTION +++
+@st.cache_data(show_spinner="Performing deep analysis and generating summary...", ttl=3600)
+def get_full_analysis(repo_url: str, endpoint: str, model: str) -> Tuple[Optional[Dict], Optional[str]]:
+    """
+    Clones, analyzes, and generates an AI summary for a repository,
+    caching the entire result for performance.
+    """
+    analysis_data, error = clone_and_analyze_repository(repo_url)
+    if error:
+        return None, error
+    
+    if analysis_data:
+        summary = generate_ai_summary(analysis_data, endpoint, model)
+        if summary:
+            analysis_data['ai_summary'] = summary
+        else:
+            # Set a non-None error message to ensure it's displayed
+            analysis_data['ai_summary'] = "Error: Could not generate AI summary."
+        
+    return analysis_data, None
+
 def ollama_chatbot_stream(question: str, context: Dict, endpoint: str, model: str) -> Generator[str, None, None]:
     prompt = f"You are an expert AI assistant. Use the repository context below to answer the user's question. If the context is insufficient, say so.\n\n**CONTEXT:**\n---\n{json.dumps(context)}\n---\n\n**QUESTION:** {question}"
     try:
@@ -288,14 +298,13 @@ def render_sidebar():
 
 def render_input_section():
     st.markdown("##### ✨ Select an Example Repository")
-    example_repos = {"Streamlit": "https://github.com/streamlit/streamlit", "VS Code": "https://github.com/microsoft/vscode", "React": "https://github.com/facebook/react", " Python": "https://github.com/vinta/awesome-python"}
+    example_repos = {"Streamlit": "https://github.com/streamlit/streamlit", "VS Code": "https://github.com/microsoft/vscode", "React": "https://github.com/facebook/react", "Python": "https://github.com/vinta/awesome-python"}
     cols = st.columns(len(example_repos))
     for i, (name, url) in enumerate(example_repos.items()):
         if cols[i].button(name, use_container_width=True):
             st.session_state.repo_url = url
     st.text_input("Or enter a public GitHub Repository URL:", key="repo_url", placeholder="https://github.com/user/repo")
 
-# --- MODIFIED: This function now includes the key statistics ---
 def render_summary_tab(data):
     st.subheader("🤖 AI Generated Summary")
     st.markdown(data.get('ai_summary', "No summary generated."), unsafe_allow_html=True)
@@ -307,7 +316,6 @@ def render_summary_tab(data):
     stat_cols[2].metric("Contributors", data.get('contributors', 'N/A'), help="Unique authors in last 500 commits.")
     stat_cols[3].metric("Latest Commit", data.get('latest_commit_date', 'N/A'))
 
-# --- MODIFIED: This function now includes the project preview image ---
 def render_visualizations_tab(data):
     st.subheader("🖼️ Project Preview")
     if image_bytes := data.get('preview_image'):
@@ -374,15 +382,11 @@ def main():
         elif ollama_endpoint == "<PASTE_YOUR_NGROK_URL_HERE>" or not ollama_endpoint:
             st.error("Please update the 'Ollama Endpoint' in the sidebar.")
         else:
-            with st.spinner("Performing deep analysis... This may take a moment."):
-                analysis_data, error = clone_and_analyze_repository(st.session_state.repo_url)
-                st.session_state.analysis_data = analysis_data if not error else None
-                st.session_state.analysis_error = error
-            if st.session_state.analysis_data:
-                with st.spinner("🤖 Contacting Colab AI for a summary..."):
-                    summary = generate_ai_summary(st.session_state.analysis_data, ollama_endpoint, ollama_model)
-                    st.session_state.analysis_data['ai_summary'] = summary
-                    if not summary: st.error("Could not generate AI summary.")
+            # --- MODIFIED: Call the single cached function ---
+            analysis_data, error = get_full_analysis(st.session_state.repo_url, ollama_endpoint, ollama_model)
+            
+            st.session_state.analysis_data = analysis_data
+            st.session_state.analysis_error = error
 
     st.markdown("---")
 
@@ -390,7 +394,6 @@ def main():
         st.error(st.session_state.analysis_error)
         
     if data := st.session_state.get('analysis_data'):
-        # --- MODIFIED: Removed the "Key Statistics" tab ---
         tab_list = ["🤖 AI Summary & Stats", "🎨 Visualizations", "📂 Code Details", "💬 Chat with Repo AI"]
         summary_tab, viz_tab, code_tab, chat_tab = st.tabs(tab_list)
 
